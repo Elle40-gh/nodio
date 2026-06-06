@@ -1,6 +1,6 @@
 [package]
 name = "nodio-app"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -8,8 +8,8 @@ nodio-core = { path = "../nodio-core" }
 nodio-api = { path = "../nodio-api" }
 nodio-gui-nodes = { path = "../nodio-gui-nodes" }
 
-eframe = { version = "0.18.0", features = ["persistence"] }
-egui-toast = "0.2.0"
+eframe = { version = "0.34", features = ["persistence"] }
+egui-toast = "0.20"
 
 pretty_env_logger = "0.4.0"
 log = "0.4.17"

@@ -1,10 +1,10 @@
 [package]
 name = "nodio-gui-nodes"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
-egui = "0.18.1"
+egui = "0.34"
 derivative = "2.2.0"
 log = "0.4.17"
 indexmap = "1.8.1"

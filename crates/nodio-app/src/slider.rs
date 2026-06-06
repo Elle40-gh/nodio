@@ -276,7 +276,7 @@ impl<'a> VolumeSlider<'a> {
         if let Some(pointer_position_2d) = response.interact_pointer_pos() {
             let position = self.pointer_position(pointer_position_2d);
             let new_value = if self.smart_aim {
-                let aim_radius = ui.input().aim_radius();
+                let aim_radius = ui.input(|i| i.aim_radius());
                 emath::smart_aim::best_in_range_f64(
                     self.value_from_position(position - aim_radius, position_range.clone()),
                     self.value_from_position(position + aim_radius, position_range.clone()),
@@ -288,7 +288,7 @@ impl<'a> VolumeSlider<'a> {
         }
 
         let value = self.get_value();
-        response.widget_info(|| WidgetInfo::slider(value, &self.text));
+        response.widget_info(|| WidgetInfo::slider(true, value, &self.text));
 
         if response.has_focus() {
             let (dec_key, inc_key) = match self.orientation {
@@ -298,8 +298,8 @@ impl<'a> VolumeSlider<'a> {
                 SliderOrientation::Vertical => (Key::ArrowUp, Key::ArrowDown),
             };
 
-            let decrement = ui.input().num_presses(dec_key);
-            let increment = ui.input().num_presses(inc_key);
+            let decrement = ui.input(|i| i.num_presses(dec_key));
+            let increment = ui.input(|i| i.num_presses(inc_key));
             let kb_step = increment as f32 - decrement as f32;
 
             if kb_step != 0.0 {
@@ -307,7 +307,7 @@ impl<'a> VolumeSlider<'a> {
                 let prev_position = self.position_from_value(prev_value, position_range.clone());
                 let new_position = prev_position + kb_step;
                 let new_value = if self.smart_aim {
-                    let aim_radius = ui.input().aim_radius();
+                    let aim_radius = ui.input(|i| i.aim_radius());
                     emath::smart_aim::best_in_range_f64(
                         self.value_from_position(new_position - aim_radius, position_range.clone()),
                         self.value_from_position(new_position + aim_radius, position_range.clone()),
@@ -351,43 +351,37 @@ impl<'a> VolumeSlider<'a> {
             }
 
             let visuals = ui.style().interact(response);
-            ui.painter().add(epaint::RectShape {
-                rect: rail_rect,
-                rounding: ui.visuals().widgets.inactive.rounding,
-                fill: ui.visuals().widgets.inactive.bg_fill,
-                // fill: visuals.bg_fill,
-                // fill: ui.visuals().extreme_bg_color,
-                stroke: Default::default(),
-                // stroke: visuals.bg_stroke,
-                // stroke: ui.visuals().widgets.inactive.bg_stroke,
-            });
+            ui.painter().add(epaint::RectShape::filled(
+                rail_rect,
+                ui.visuals().widgets.inactive.rounding(),
+                ui.visuals().widgets.inactive.bg_fill,
+            ));
 
             if self.peak_values.0 > 1e-6 {
-                ui.painter().add(epaint::RectShape {
-                    rect: peak_left_rect,
-                    rounding: Rounding::same(0.0),
-                    fill: visuals.text_color(),
-                    stroke: Default::default(),
-                });
+                ui.painter().add(epaint::RectShape::filled(
+                    peak_left_rect,
+                    0.0,
+                    visuals.text_color(),
+                ));
             }
 
             if self.peak_values.1 > 1e-6 {
-                ui.painter().add(epaint::RectShape {
-                    rect: peak_right_rect,
-                    rounding: Rounding::same(0.0),
-                    fill: visuals.text_color(),
-                    stroke: Default::default(),
-                });
+                ui.painter().add(epaint::RectShape::filled(
+                    peak_right_rect,
+                    0.0,
+                    visuals.text_color(),
+                ));
             }
 
             let center = self.marker_center(position_1d, &rail_rect);
 
-            ui.painter().add(epaint::RectShape {
-                rect: self.handle_rect(center, rect),
-                fill: visuals.bg_fill,
-                stroke: visuals.fg_stroke,
-                rounding: Rounding::same(2.0),
-            });
+            ui.painter().add(epaint::RectShape::new(
+                self.handle_rect(center, rect),
+                2.0,
+                visuals.bg_fill,
+                visuals.fg_stroke,
+                egui::StrokeKind::Middle,
+            ));
         }
     }
 
@@ -450,7 +444,7 @@ impl<'a> VolumeSlider<'a> {
         if !self.text.is_empty() {
             let text_color = self.text_color.unwrap_or_else(|| ui.visuals().text_color());
             let text = RichText::new(&self.text).color(text_color);
-            ui.add(Label::new(text).wrap(false));
+            ui.add(Label::new(text).truncate());
         }
     }
 
@@ -461,7 +455,7 @@ impl<'a> VolumeSlider<'a> {
         let response = ui.add(
             DragValue::new(&mut value)
                 .speed(speed)
-                .clamp_range(self.clamp_range())
+                .range(self.clamp_range())
                 .min_decimals(self.min_decimals)
                 .max_decimals_opt(self.max_decimals)
                 .suffix(self.suffix.clone())
@@ -509,7 +503,7 @@ impl<'a> VolumeSlider<'a> {
         if !self.text.is_empty() {
             let text_color = self.text_color.unwrap_or_else(|| ui.visuals().text_color());
             let text = RichText::new(&self.text).color(text_color);
-            ui.add(Label::new(text).wrap(false));
+            ui.add(Label::new(text).truncate());
         }
 
         response
@@ -586,7 +580,7 @@ fn value_from_normalized(normalized: f64, range: RangeInclusive<f64>, spec: &Sli
             }
         }
     } else {
-        egui::egui_assert!(
+        debug_assert!(
             min.is_finite() && max.is_finite(),
             "You should use a logarithmic range"
         );
@@ -635,7 +629,7 @@ fn normalized_from_value(value: f64, range: RangeInclusive<f64>, spec: &SliderSp
             }
         }
     } else {
-        egui::egui_assert!(
+        debug_assert!(
             min.is_finite() && max.is_finite(),
             "You should use a logarithmic range"
         );
@@ -683,6 +677,6 @@ fn logaritmic_zero_cutoff(min: f64, max: f64) -> f64 {
     };
 
     let cutoff = min_magnitude / (min_magnitude + max_magnitude);
-    egui_assert!((0.0..=1.0).contains(&cutoff));
+    debug_assert!((0.0..=1.0).contains(&cutoff));
     cutoff
 }
