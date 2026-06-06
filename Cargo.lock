@@ -2023,11 +2023,11 @@ dependencies = [
 
 [[package]]
 name = "nodio"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "nodio-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "nodio-core",
  "nodio-win32",
@@ -2036,7 +2036,7 @@ dependencies = [
 
 [[package]]
 name = "nodio-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "eframe",
  "egui-toast",
@@ -2052,7 +2052,7 @@ dependencies = [
 
 [[package]]
 name = "nodio-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2061,7 +2061,7 @@ dependencies = [
 
 [[package]]
 name = "nodio-gui-nodes"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "derivative",
  "egui",
@@ -2072,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "nodio-win32"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "log",
  "nodio-core",
