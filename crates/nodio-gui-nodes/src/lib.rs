@@ -43,6 +43,8 @@ pub struct Context {
     #[derivative(Default(value = "[[0.0; 2].into(); 2].into()"))]
     canvas_rect_screen_space: Rect,
 
+    canvas_response: Option<egui::Response>,
+
     hovered_node_id: Option<Uuid>,
     interactive_node_id: Option<Uuid>,
     hovered_link_id: Option<Uuid>,
@@ -107,6 +109,14 @@ impl Context {
         self.canvas_rect_screen_space = ui.available_rect_before_wrap();
         self.canvas_origin_screen_space = self.canvas_rect_screen_space.min.to_vec2();
 
+        // Allocate the canvas interaction FIRST so that interior widgets (sliders, etc.)
+        // are allocated later and win the press event in egui 0.34's last-wins hit-test model.
+        self.canvas_response = Some(ui.interact(
+            self.canvas_rect_screen_space,
+            ui.id().with("Input"),
+            Sense::click_and_drag(),
+        ));
+
         for node in self.nodes.values_mut() {
             node.in_use = false;
         }
@@ -122,10 +132,10 @@ impl Context {
         let mut ui = ui.child_ui(
             self.canvas_rect_screen_space,
             egui::Layout::top_down(egui::Align::Center),
+            None,
         );
 
-        let screen_rect = ui.ctx().input().screen_rect();
-        ui.set_clip_rect(self.canvas_rect_screen_space.intersect(screen_rect));
+        ui.set_clip_rect(self.canvas_rect_screen_space);
 
         ui.painter().rect_filled(
             self.canvas_rect_screen_space,
@@ -139,11 +149,13 @@ impl Context {
     }
 
     pub fn end_frame(&mut self, ui: &mut Ui) -> egui::Response {
-        let response = ui.interact(
-            self.canvas_rect_screen_space,
-            ui.id().with("Input"),
-            Sense::click_and_drag(),
-        );
+        let response = self.canvas_response.take().unwrap_or_else(|| {
+            ui.interact(
+                self.canvas_rect_screen_space,
+                ui.id().with("Input"),
+                Sense::click_and_drag(),
+            )
+        });
 
         let mouse_pos = if let Some(mouse_pos) = response.hover_pos() {
             self.mouse_in_canvas = true;
@@ -157,9 +169,7 @@ impl Context {
 
         let left_mouse_pressed = ui
             .ctx()
-            .input()
-            .pointer
-            .button_down(egui::PointerButton::Primary);
+            .input(|i| i.pointer.button_down(egui::PointerButton::Primary));
         self.left_mouse_released =
             (self.left_mouse_pressed || self.left_mouse_dragging) && !left_mouse_pressed;
         self.left_mouse_dragging =
@@ -170,11 +180,11 @@ impl Context {
         let alt_mouse_clicked = self
             .io
             .emulate_three_button_mouse
-            .is_active(&ui.ctx().input().modifiers)
+            .is_active(&ui.ctx().input(|i| i.modifiers))
             || self
                 .io
                 .alt_mouse_button
-                .map_or(false, |x| ui.ctx().input().pointer.button_down(x));
+                .map_or(false, |x| ui.ctx().input(|i| i.pointer.button_down(x)));
         self.alt_mouse_dragging =
             (self.alt_mouse_clicked || self.alt_mouse_dragging) && alt_mouse_clicked;
         self.alt_mouse_clicked =
@@ -182,7 +192,7 @@ impl Context {
         self.link_detach_with_modifier_click = self
             .io
             .link_detach_with_modifier_click
-            .is_active(&ui.ctx().input().modifiers);
+            .is_active(&ui.ctx().input(|i| i.modifiers));
 
         if self.mouse_in_canvas {
             self.resolve_occluded_pins();
@@ -229,6 +239,7 @@ impl Context {
             self.canvas_rect_screen_space,
             0.0,
             (1.0, self.style.colors[ColorStyle::GridLine as usize]),
+            egui::StrokeKind::Middle,
         );
 
         response
@@ -1057,7 +1068,7 @@ impl Context {
                 let box_selector_outline =
                     self.style.colors[ColorStyle::BoxSelectorOutline as usize];
                 ui.painter()
-                    .rect(rect, 0.0, box_selector_color, (1.0, box_selector_outline));
+                    .rect(rect, 0.0, box_selector_color, (1.0, box_selector_outline), egui::StrokeKind::Middle);
 
                 if self.left_mouse_released {
                     let mut ids = Vec::with_capacity(self.selected_node_ids.len());

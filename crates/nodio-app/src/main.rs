@@ -1,11 +1,10 @@
 #![deny(clippy::all)]
-use std::ops::Sub;
 use std::sync::Arc;
 use std::time::Duration;
 
 use eframe::{egui, App, CreationContext, Frame, NativeOptions, Storage};
 use egui::{pos2, Color32, FontData, FontDefinitions, FontFamily, RichText, Style, Widget};
-use egui_toast::Toasts;
+use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 use indexmap::IndexMap;
 use log::{debug, warn};
 use parking_lot::RwLock;
@@ -26,13 +25,16 @@ fn main() {
     eframe::run_native(
         "Nodio",
         NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_inner_size([1200.0, 800.0]),
             ..Default::default()
         },
-        Box::new(setup_app),
-    );
+        Box::new(|cc| Ok(setup_app(cc))),
+    )
+    .unwrap();
 }
 
-fn setup_app(setup_ctx: &CreationContext) -> Box<dyn App> {
+fn setup_app(setup_ctx: &CreationContext) -> Box<dyn App + 'static> {
     let mut app = MyApp::default();
 
     let mut style = Style::default();
@@ -43,7 +45,7 @@ fn setup_app(setup_ctx: &CreationContext) -> Box<dyn App> {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
         "custom".to_owned(),
-        FontData::from_static(include_bytes!("../fonts/Lato-Regular.ttf")),
+        Arc::new(FontData::from_static(include_bytes!("../fonts/Lato-Regular.ttf"))),
     );
     fonts
         .families
@@ -117,15 +119,8 @@ impl MyApp {
     fn interact_and_draw(&mut self, ui_ctx: &egui::Context, ui: &mut Ui) {
         let node_count = self.ctx.read().nodes().len();
 
-        let mut toasts = Toasts::new(ui_ctx)
-            .anchor(
-                ui_ctx
-                    .available_rect()
-                    .max
-                    .sub(Pos2::new(10.0, 10.0))
-                    .to_pos2(),
-            )
-            .align_to_end(true)
+        let mut toasts = Toasts::new()
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::pos2(-10.0, -10.0))
             .direction(Direction::BottomUp);
 
         self.node_ctx.begin_frame(ui);
@@ -154,11 +149,14 @@ impl MyApp {
             let header_contents = |ui: &mut Ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_enabled_ui(node_present, move |ui| {
-                        ui.label(format!(
-                            "{}{}",
-                            node_display_name,
-                            if node_active { " 🔉" } else { "" }
-                        ))
+                        ui.add(
+                            egui::Label::new(format!(
+                                "{}{}",
+                                node_display_name,
+                                if node_active { " 🔉" } else { "" }
+                            ))
+                            .selectable(false),
+                        )
                     });
                 });
             };
@@ -170,15 +168,15 @@ impl MyApp {
                         ui.add_enabled_ui(node_present, |ui| {
                             ui.spacing_mut().slider_width = 130.0;
 
-                            if VolumeSlider::new(&mut node_volume, node_peak_values)
-                                .ui(ui)
-                                .changed()
-                            {
+                            let r = VolumeSlider::new(&mut node_volume, node_peak_values).ui(ui);
+                            if r.changed() {
                                 ctx.write().set_volume(node_id, node_volume);
                             }
-                        });
+                            r
+                        })
+                        .inner
                     })
-                    .response
+                    .inner
                 }
             };
 
@@ -236,7 +234,12 @@ impl MyApp {
                 Err(err) => {
                     warn!("Failed to connect nodes: {}", err);
 
-                    toasts.error(err.to_string(), Duration::from_secs(10));
+                    toasts.add(Toast {
+                        text: err.to_string().into(),
+                        kind: ToastKind::Error,
+                        options: ToastOptions::default().duration_in_seconds(10.0),
+                        ..Default::default()
+                    });
 
                     if let Some((from, to)) = self.detached_link.take() {
                         self.ui_links.insert(Uuid::new_v4(), (from, to));
@@ -257,11 +260,11 @@ impl MyApp {
             });
         }
 
-        if ui.input().key_pressed(egui::Key::Delete) {
+        if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
             self.remove_selected_nodes();
         }
 
-        toasts.show();
+        toasts.show(ui);
     }
 
     fn context_menu(&mut self, nodes_response: Response) {
@@ -303,6 +306,7 @@ impl MyApp {
     }
 
     fn editor_context_menu_items(&mut self, ui: &mut Ui) {
+        ui.set_min_width(160.0);
         let mut added_node = None;
 
         let menu_pos = ui
@@ -312,12 +316,14 @@ impl MyApp {
             .min;
 
         ui.menu_button("Application", |ui| {
+            ui.set_min_width(180.0);
             for process in self.ctx.read().application_processes() {
                 Self::application_node_button(&mut added_node, menu_pos, ui, process);
             }
         });
 
         ui.menu_button("Input device", |ui| {
+            ui.set_min_width(180.0);
             for device in self.ctx.read().input_devices() {
                 Self::device_node_button(
                     &mut added_node,
@@ -330,6 +336,7 @@ impl MyApp {
         });
 
         ui.menu_button("Output device", |ui| {
+            ui.set_min_width(180.0);
             for device in self.ctx.read().output_devices() {
                 Self::device_node_button(
                     &mut added_node,
@@ -354,7 +361,7 @@ impl MyApp {
         process: ProcessInfo,
     ) {
         if egui::Button::new(&process.display_name)
-            .wrap(false)
+            .truncate()
             .ui(ui)
             .clicked()
         {
@@ -377,7 +384,7 @@ impl MyApp {
         device: DeviceInfo,
         node_kind: NodeKind,
     ) {
-        if egui::Button::new(&device.name).wrap(false).ui(ui).clicked() {
+        if egui::Button::new(&device.name).truncate().ui(ui).clicked() {
             added_node.replace(Node {
                 id: device.id,
                 kind: node_kind,
@@ -391,12 +398,10 @@ impl MyApp {
 }
 
 impl App for MyApp {
-    fn update(&mut self, ui_ctx: &egui::Context, _frame: &mut Frame) {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none())
-            .show(ui_ctx, |ui| self.interact_and_draw(ui_ctx, ui));
-
-        ui_ctx.request_repaint();
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
+        let ctx = ui.ctx().clone();
+        self.interact_and_draw(&ctx, ui);
+        ctx.request_repaint();
     }
 
     fn save(&mut self, storage: &mut dyn Storage) {

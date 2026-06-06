@@ -199,6 +199,7 @@ impl Style {
                 Rect::from_center_size(pin_pos, [self.pin_quad_side_length / 2.0; 2].into()),
                 0.0,
                 (self.pin_line_thickness, pin_color),
+                egui::StrokeKind::Middle,
             )),
             PinShape::QuadFilled => painter.add(egui::Shape::rect_filled(
                 Rect::from_center_size(pin_pos, [self.pin_quad_side_length / 2.0; 2].into()),
@@ -231,7 +232,7 @@ impl Style {
                         pin_pos + (left_offset, -verticacl_offset).into(),
                     ],
                     pin_color,
-                    egui::Stroke::none(),
+                    egui::Stroke::NONE,
                 ))
             }
         };
