@@ -193,6 +193,17 @@ impl AudioSession {
         }
     }
 
+    pub fn set_mute(&self, muted: bool) {
+        unsafe {
+            if let Err(err) = self.simple_audio_volume.SetMute(BOOL::from(muted), null()) {
+                warn!(
+                    "Failed to set mute for session {}: {:?}",
+                    self.process_id, err
+                );
+            }
+        }
+    }
+
     pub fn master_volume(&self) -> f32 {
         unsafe { self.simple_audio_volume.GetMasterVolume().unwrap_or(0.0) as f32 }
     }

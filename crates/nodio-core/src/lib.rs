@@ -13,6 +13,7 @@ pub trait Context {
     fn connect_node(&mut self, node_id: Uuid, target_id: Uuid) -> Result<()>;
     fn disconnect_node(&mut self, node_id: Uuid, target_id: Uuid);
     fn set_volume(&mut self, node_id: Uuid, volume: f32);
+    fn set_muted(&mut self, node_id: Uuid, muted: bool);
     fn application_processes(&self) -> Vec<ProcessInfo>;
     fn input_devices(&self) -> Vec<DeviceInfo>;
     fn output_devices(&self) -> Vec<DeviceInfo>;

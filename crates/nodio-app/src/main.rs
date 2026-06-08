@@ -224,6 +224,7 @@ impl MyApp {
                 volume: mut node_volume,
                 active: node_active,
                 present: node_present,
+                muted: node_muted,
                 peak_values: node_peak_values,
                 display_name: node_display_name,
                 pos: node_pos,
@@ -238,19 +239,24 @@ impl MyApp {
                 },
             };
 
-            let header_contents = |ui: &mut Ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_enabled_ui(node_present, move |ui| {
-                        ui.add(
-                            egui::Label::new(format!(
-                                "{}{}",
-                                node_display_name,
-                                if node_active { " 🔉" } else { "" }
-                            ))
-                            .selectable(false),
-                        )
+            let header_contents = {
+                let ctx = self.ctx.clone();
+                move |ui: &mut Ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_enabled_ui(node_present, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::Label::new(&node_display_name).selectable(false),
+                                );
+                                let icon =
+                                    if node_muted { "🔇" } else if node_active { "🔉" } else { "🔈" };
+                                if ui.small_button(icon).clicked() {
+                                    ctx.write().set_muted(node_id, !node_muted);
+                                }
+                            })
+                        });
                     });
-                });
+                }
             };
 
             let attr_contents = {

@@ -17,6 +17,7 @@ use windows::Win32::Media::Audio::{
     EDataFlow, IAudioSessionControl, IAudioSessionEnumerator, IAudioSessionManager2,
     IAudioSessionNotification, IMMDevice,
 };
+use windows::Win32::Foundation::BOOL;
 use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, STGM_READ, STGM_WRITE};
 use windows::Win32::System::Com::CLSCTX_ALL;
 use windows::Win32::System::Ole::{VT_BOOL, VT_LPWSTR};
@@ -268,6 +269,16 @@ impl AudioDevice {
             if let Some(endpoint_volume) = self.endpoint_volume.as_ref() {
                 if let Err(err) = endpoint_volume.SetMasterVolumeLevelScalar(volume, null()) {
                     warn!("Failed to get audio endpoint volume: {}", err);
+                }
+            }
+        }
+    }
+
+    pub fn set_mute(&self, muted: bool) {
+        unsafe {
+            if let Some(endpoint_volume) = self.endpoint_volume.as_ref() {
+                if let Err(err) = endpoint_volume.SetMute(BOOL::from(muted), null()) {
+                    warn!("Failed to set mute for audio endpoint: {}", err);
                 }
             }
         }
