@@ -12,7 +12,7 @@ use log::{debug, warn};
 use parking_lot::RwLock;
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem},
-    TrayIcon, TrayIconBuilder,
+    MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
 };
 
 use nodio_api::create_nodio_context;
@@ -188,6 +188,7 @@ impl MyApp {
 
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
+            .with_menu_on_left_click(false)
             .with_tooltip("Nodio")
             .with_icon(make_tray_icon())
             .build()
@@ -510,7 +511,21 @@ impl App for MyApp {
             }
         }
 
-        // Poll tray context-menu events
+        // Left-click on the tray icon → show the window
+        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                self.visible = true;
+                ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(ViewportCommand::Focus);
+            }
+        }
+
+        // Right-click tray context-menu events
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id == self.show_id {
                 self.visible = !self.visible;
