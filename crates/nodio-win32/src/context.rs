@@ -599,6 +599,31 @@ impl Context for Win32Context {
         }
     }
 
+    fn set_muted(&mut self, node_id: Uuid, muted: bool) {
+        if let Some(node) = self.nodes.iter_mut().find(|n| n.id == node_id) {
+            node.muted = muted;
+        }
+        if let Some(node) = self.nodes.iter().find(|n| n.id == node_id) {
+            for matching_session in self
+                .sessions
+                .read()
+                .iter()
+                .filter(|session| session_node_match(node, session))
+            {
+                matching_session.set_mute(muted);
+            }
+
+            for matching_device in self
+                .output_devices
+                .read()
+                .iter()
+                .filter(|device| device.id() == node_id)
+            {
+                matching_device.set_mute(muted);
+            }
+        }
+    }
+
     fn application_processes(&self) -> Vec<ProcessInfo> {
         let mut added_pids = HashSet::new();
         let mut processes = Vec::new();
