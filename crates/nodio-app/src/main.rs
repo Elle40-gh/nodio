@@ -3,11 +3,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use eframe::{egui, App, CreationContext, Frame, NativeOptions, Storage};
-use egui::{pos2, Color32, FontData, FontDefinitions, FontFamily, RichText, Style, Widget};
+use egui::{
+    pos2, Color32, FontData, FontDefinitions, FontFamily, RichText, Style, ViewportCommand, Widget,
+};
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 use indexmap::IndexMap;
 use log::{debug, warn};
 use parking_lot::RwLock;
+use tray_icon::{
+    menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem},
+    TrayIcon, TrayIconBuilder,
+};
 
 use nodio_api::create_nodio_context;
 use nodio_core::{Context, DeviceInfo, ProcessInfo, Uuid};
@@ -19,33 +25,91 @@ use crate::egui::{Direction, Pos2, Response, Ui};
 
 mod slider;
 
+/// Two node circles connected by a 1.5-cycle sine wave, rendered at 32×32 RGBA.
+/// Shared by both the tray icon and the window icon.
+fn icon_rgba() -> Vec<u8> {
+    const W: u32 = 32;
+    const H: u32 = 32;
+    let mut rgba = vec![0u8; (W * H * 4) as usize];
+
+    // Anti-aliased filled disk. Max-alpha blending lets overlapping strokes accumulate
+    // without double-darkening.
+    fn paint(rgba: &mut [u8], w: u32, h: u32, cx: f32, cy: f32, radius: f32) {
+        let x0 = (cx - radius - 1.0).max(0.0) as u32;
+        let x1 = ((cx + radius + 2.0).min(w as f32)) as u32;
+        let y0 = (cy - radius - 1.0).max(0.0) as u32;
+        let y1 = ((cy + radius + 2.0).min(h as f32)) as u32;
+        for py in y0..y1 {
+            for px in x0..x1 {
+                let dx = px as f32 + 0.5 - cx;
+                let dy = py as f32 + 0.5 - cy;
+                let dist = (dx * dx + dy * dy).sqrt();
+                let a = ((radius - dist + 0.5).clamp(0.0, 1.0) * 255.0) as u8;
+                if a == 0 {
+                    continue;
+                }
+                let i = ((py * w + px) * 4) as usize;
+                if a > rgba[i + 3] {
+                    rgba[i] = 100;
+                    rgba[i + 1] = 210;
+                    rgba[i + 2] = 255;
+                    rgba[i + 3] = a;
+                }
+            }
+        }
+    }
+
+    paint(&mut rgba, W, H, 5.5, 16.0, 4.5);  // left node
+    paint(&mut rgba, W, H, 26.5, 16.0, 4.5); // right node
+    for step in 0..=120_u32 {
+        let t = step as f32 / 120.0;
+        let wx = 9.5 + t * 13.0;
+        let wy = 16.0 + 5.0 * (t * std::f32::consts::PI * 3.0).sin();
+        paint(&mut rgba, W, H, wx, wy, 1.5);
+    }
+
+    rgba
+}
+
+fn make_tray_icon() -> tray_icon::Icon {
+    tray_icon::Icon::from_rgba(icon_rgba(), 32, 32).expect("valid icon")
+}
+
+fn make_app_icon() -> egui::viewport::IconData {
+    egui::viewport::IconData { rgba: icon_rgba(), width: 32, height: 32 }
+}
+
 fn main() {
     pretty_env_logger::init();
+
+    let start_hidden = std::env::args().any(|a| a == "--minimized");
 
     eframe::run_native(
         "Nodio",
         NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([1200.0, 800.0]),
+                .with_inner_size([1200.0, 800.0])
+                .with_visible(!start_hidden)
+                .with_icon(make_app_icon()),
             ..Default::default()
         },
-        Box::new(|cc| Ok(setup_app(cc))),
+        Box::new(move |cc| Ok(setup_app(cc, start_hidden))),
     )
     .unwrap();
 }
 
-fn setup_app(setup_ctx: &CreationContext) -> Box<dyn App + 'static> {
-    let mut app = MyApp::default();
-
+fn setup_app(setup_ctx: &CreationContext, start_hidden: bool) -> Box<dyn App + 'static> {
     let mut style = Style::default();
     style.visuals.override_text_color = Some(Color32::from_rgb(225, 225, 225));
     style.visuals.widgets.noninteractive.bg_fill = Color32::from_rgba_unmultiplied(50, 50, 50, 255);
-    setup_ctx.egui_ctx.set_style(style);
+    setup_ctx.egui_ctx.set_global_style(style);
 
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
         "custom".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!("../fonts/Lato-Regular.ttf"))),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../fonts/Lato-Regular.ttf"
+        ))),
     );
     fonts
         .families
@@ -57,8 +121,9 @@ fn setup_app(setup_ctx: &CreationContext) -> Box<dyn App + 'static> {
         .get_mut(&FontFamily::Monospace)
         .unwrap()
         .push("custom".to_owned());
-
     setup_ctx.egui_ctx.set_fonts(fonts);
+
+    let mut app = MyApp::new(start_hidden);
 
     if let Some(nodes_json) = setup_ctx
         .storage
@@ -98,12 +163,36 @@ struct MyApp {
     ui_links: IndexMap<Uuid, (Uuid, Uuid)>,
     context_menu_kind: Option<ContextMenuKind>,
     detached_link: Option<(Uuid, Uuid)>,
-
     should_save: bool,
+    // Tray state — _tray must stay alive or the icon disappears
+    _tray: TrayIcon,
+    show_id: MenuId,
+    quit_id: MenuId,
+    visible: bool,
+    /// Set before requesting a real close so close-interception lets it through
+    should_quit: bool,
 }
 
-impl Default for MyApp {
-    fn default() -> Self {
+impl MyApp {
+    fn new(start_hidden: bool) -> Self {
+        let show_item = MenuItem::new("Show UI", true, None);
+        let quit_item = MenuItem::new("Quit", true, None);
+        let show_id = show_item.id().clone();
+        let quit_id = quit_item.id().clone();
+
+        let menu = Menu::new();
+        menu.append(&show_item).expect("append show");
+        menu.append(&PredefinedMenuItem::separator())
+            .expect("append separator");
+        menu.append(&quit_item).expect("append quit");
+
+        let tray = TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("Nodio")
+            .with_icon(make_tray_icon())
+            .build()
+            .expect("tray icon");
+
         Self {
             ctx: create_nodio_context(),
             node_ctx: NodeContext::default(),
@@ -111,11 +200,14 @@ impl Default for MyApp {
             context_menu_kind: None,
             detached_link: None,
             should_save: false,
+            _tray: tray,
+            show_id,
+            quit_id,
+            visible: !start_hidden,
+            should_quit: false,
         }
     }
-}
 
-impl MyApp {
     fn interact_and_draw(&mut self, ui_ctx: &egui::Context, ui: &mut Ui) {
         let node_count = self.ctx.read().nodes().len();
 
@@ -260,7 +352,7 @@ impl MyApp {
             });
         }
 
-        if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
+        if ui_ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
             self.remove_selected_nodes();
         }
 
@@ -293,7 +385,7 @@ impl MyApp {
             // Remove other nodes too, when multiple nodes selected
             self.remove_selected_nodes();
 
-            ui.close_menu();
+            ui.close();
         }
     }
 
@@ -373,7 +465,7 @@ impl MyApp {
                 process_id: Some(process.pid),
                 ..Default::default()
             });
-            ui.close_menu();
+            ui.close();
         }
     }
 
@@ -392,15 +484,50 @@ impl MyApp {
                 pos: (menu_pos.x, menu_pos.y),
                 ..Default::default()
             });
-            ui.close_menu();
+            ui.close();
         }
     }
 }
 
 impl App for MyApp {
+    // `logic` runs even when the window is hidden (if repaint was requested),
+    // making it the right place for tray event polling and close interception.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        // Intercept window close — hide to tray instead of quitting
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.should_quit {
+                // Tray "Quit" was clicked; let eframe proceed with closing
+            } else {
+                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+                self.visible = false;
+                ctx.send_viewport_cmd(ViewportCommand::Visible(false));
+            }
+        }
+
+        // Poll tray context-menu events
+        while let Ok(event) = MenuEvent::receiver().try_recv() {
+            if event.id == self.show_id {
+                self.visible = !self.visible;
+                ctx.send_viewport_cmd(ViewportCommand::Visible(self.visible));
+                if self.visible {
+                    ctx.send_viewport_cmd(ViewportCommand::Focus);
+                }
+            } else if event.id == self.quit_id {
+                self.should_quit = true;
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+            }
+        }
+
+        // When hidden, keep ticking so tray events are processed promptly
+        if !self.visible {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
         let ctx = ui.ctx().clone();
         self.interact_and_draw(&ctx, ui);
+        // Continuous repaint keeps the audio-level visualization live
         ctx.request_repaint();
     }
 

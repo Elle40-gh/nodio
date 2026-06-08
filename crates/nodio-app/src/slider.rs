@@ -323,7 +323,7 @@ impl<'a> VolumeSlider<'a> {
         if ui.is_rect_visible(response.rect) {
             let value = self.get_value();
 
-            let rail_radius = ui.painter().round_to_pixel(self.rail_radius_limit(rect));
+            let rail_radius = self.rail_radius_limit(rect).round();
             let rail_rect = self.rail_rect(rect, rail_radius);
 
             let position_1d = self.position_from_value(value, position_range.clone());
@@ -353,7 +353,7 @@ impl<'a> VolumeSlider<'a> {
             let visuals = ui.style().interact(response);
             ui.painter().add(epaint::RectShape::filled(
                 rail_rect,
-                ui.visuals().widgets.inactive.rounding(),
+                ui.visuals().widgets.inactive.corner_radius,
                 ui.visuals().widgets.inactive.bg_fill,
             ));
 
