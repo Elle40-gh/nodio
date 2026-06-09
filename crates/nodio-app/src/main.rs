@@ -11,7 +11,7 @@ use indexmap::IndexMap;
 use log::{debug, warn};
 use parking_lot::RwLock;
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem},
     MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
 };
 
@@ -59,7 +59,7 @@ fn icon_rgba() -> Vec<u8> {
         }
     }
 
-    paint(&mut rgba, W, H, 5.5, 16.0, 4.5);  // left node
+    paint(&mut rgba, W, H, 5.5, 16.0, 4.5); // left node
     paint(&mut rgba, W, H, 26.5, 16.0, 4.5); // right node
     for step in 0..=120_u32 {
         let t = step as f32 / 120.0;
@@ -76,13 +76,17 @@ fn make_tray_icon() -> tray_icon::Icon {
 }
 
 fn make_app_icon() -> egui::viewport::IconData {
-    egui::viewport::IconData { rgba: icon_rgba(), width: 32, height: 32 }
+    egui::viewport::IconData {
+        rgba: icon_rgba(),
+        width: 32,
+        height: 32,
+    }
 }
 
 fn main() {
     pretty_env_logger::init();
 
-    let start_hidden = std::env::args().any(|a| a == "--minimized");
+    let start_hidden = std::env::args().any(|a| a == nodio_core::STARTUP_MINIMIZED_ARG);
 
     eframe::run_native(
         "Nodio",
@@ -168,6 +172,8 @@ struct MyApp {
     _tray: TrayIcon,
     show_id: MenuId,
     quit_id: MenuId,
+    startup_item: CheckMenuItem,
+    startup_id: MenuId,
     visible: bool,
     /// Set before requesting a real close so close-interception lets it through
     should_quit: bool,
@@ -175,13 +181,21 @@ struct MyApp {
 
 impl MyApp {
     fn new(start_hidden: bool) -> Self {
+        let ctx = create_nodio_context();
+
         let show_item = MenuItem::new("Show UI", true, None);
         let quit_item = MenuItem::new("Quit", true, None);
+        let startup_item =
+            CheckMenuItem::new("Run on startup", true, ctx.read().run_at_startup(), None);
         let show_id = show_item.id().clone();
         let quit_id = quit_item.id().clone();
+        let startup_id = startup_item.id().clone();
 
         let menu = Menu::new();
         menu.append(&show_item).expect("append show");
+        menu.append(&PredefinedMenuItem::separator())
+            .expect("append separator");
+        menu.append(&startup_item).expect("append startup");
         menu.append(&PredefinedMenuItem::separator())
             .expect("append separator");
         menu.append(&quit_item).expect("append quit");
@@ -195,7 +209,7 @@ impl MyApp {
             .expect("tray icon");
 
         Self {
-            ctx: create_nodio_context(),
+            ctx,
             node_ctx: NodeContext::default(),
             ui_links: IndexMap::new(),
             context_menu_kind: None,
@@ -204,6 +218,8 @@ impl MyApp {
             _tray: tray,
             show_id,
             quit_id,
+            startup_item,
+            startup_id,
             visible: !start_hidden,
             should_quit: false,
         }
@@ -246,11 +262,14 @@ impl MyApp {
                     ui.vertical_centered(|ui| {
                         ui.add_enabled_ui(node_present, |ui| {
                             ui.horizontal(|ui| {
-                                ui.add(
-                                    egui::Label::new(&node_display_name).selectable(false),
-                                );
-                                let icon =
-                                    if node_muted { "🔇" } else if node_active { "🔉" } else { "🔈" };
+                                ui.add(egui::Label::new(&node_display_name).selectable(false));
+                                let icon = if node_muted {
+                                    "🔇"
+                                } else if node_active {
+                                    "🔉"
+                                } else {
+                                    "🔈"
+                                };
                                 if ui.small_button(icon).clicked() {
                                     ctx.write().set_muted(node_id, !node_muted);
                                 }
@@ -533,6 +552,10 @@ impl App for MyApp {
                 if self.visible {
                     ctx.send_viewport_cmd(ViewportCommand::Focus);
                 }
+            } else if event.id == self.startup_id {
+                let new_state = !self.ctx.read().run_at_startup();
+                self.ctx.write().set_run_at_startup(new_state);
+                self.startup_item.set_checked(new_state);
             } else if event.id == self.quit_id {
                 self.should_quit = true;
                 ctx.send_viewport_cmd(ViewportCommand::Close);

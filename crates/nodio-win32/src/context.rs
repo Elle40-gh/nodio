@@ -4,6 +4,37 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+const STARTUP_RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+const STARTUP_VALUE: &str = "Nodio";
+
+/// The command line registered in the Run key: the current exe, started minimized.
+fn startup_command() -> Option<String> {
+    std::env::current_exe()
+        .ok()
+        .map(|exe| format!("\"{}\" {}", exe.display(), nodio_core::STARTUP_MINIMIZED_ARG))
+}
+
+/// Remove the Run-key entry if it points at an exe that no longer exists (e.g. the app
+/// was moved or deleted without toggling startup off first).
+fn cleanup_stale_startup() {
+    let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+    let flags = winreg::enums::KEY_QUERY_VALUE | winreg::enums::KEY_SET_VALUE;
+    let Ok(key) = hkcu.open_subkey_with_flags(STARTUP_RUN_KEY, flags) else {
+        return;
+    };
+    let Ok(val) = key.get_value::<String, _>(STARTUP_VALUE) else {
+        return;
+    };
+    let exe_path = if val.starts_with('"') {
+        val.split('"').nth(1).unwrap_or("").to_string()
+    } else {
+        val.split_whitespace().next().unwrap_or("").to_string()
+    };
+    if !std::path::Path::new(&exe_path).exists() {
+        key.delete_value(STARTUP_VALUE).ok();
+    }
+}
+
 use log::{debug, error, info, trace, warn};
 use notify_thread::JoinHandle;
 use parking_lot::RwLock;
@@ -60,6 +91,7 @@ impl Drop for Win32Context {
 impl Win32Context {
     pub fn new() -> Arc<RwLock<Self>> {
         ensure_com_initialized();
+        cleanup_stale_startup();
 
         let device_enumerator = AudioDeviceEnumerator::create().unwrap();
 
@@ -621,6 +653,34 @@ impl Context for Win32Context {
             {
                 matching_device.set_mute(muted);
             }
+        }
+    }
+
+    fn run_at_startup(&self) -> bool {
+        let Some(cmd) = startup_command() else {
+            return false;
+        };
+        winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+            .open_subkey(STARTUP_RUN_KEY)
+            .ok()
+            .and_then(|key| key.get_value::<String, _>(STARTUP_VALUE).ok())
+            .map(|v| v == cmd)
+            .unwrap_or(false)
+    }
+
+    fn set_run_at_startup(&mut self, enabled: bool) {
+        let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+        let Ok(key) =
+            hkcu.open_subkey_with_flags(STARTUP_RUN_KEY, winreg::enums::KEY_SET_VALUE)
+        else {
+            return;
+        };
+        if enabled {
+            if let Some(cmd) = startup_command() {
+                key.set_value(STARTUP_VALUE, &cmd).ok();
+            }
+        } else {
+            key.delete_value(STARTUP_VALUE).ok();
         }
     }
 

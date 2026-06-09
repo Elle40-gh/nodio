@@ -5,6 +5,10 @@ pub use result::{Error, Result};
 use serde::{Deserialize, Serialize};
 pub use uuid::Uuid;
 
+/// CLI flag that starts the app hidden into the tray. Parsed by the app at launch and
+/// written into the run-at-startup command by the platform layer, so both agree on it.
+pub const STARTUP_MINIMIZED_ARG: &str = "--minimized";
+
 pub trait Context {
     fn add_node(&mut self, node: Node);
     fn remove_node(&mut self, node_id: Uuid);
@@ -14,6 +18,8 @@ pub trait Context {
     fn disconnect_node(&mut self, node_id: Uuid, target_id: Uuid);
     fn set_volume(&mut self, node_id: Uuid, volume: f32);
     fn set_muted(&mut self, node_id: Uuid, muted: bool);
+    fn run_at_startup(&self) -> bool;
+    fn set_run_at_startup(&mut self, enabled: bool);
     fn application_processes(&self) -> Vec<ProcessInfo>;
     fn input_devices(&self) -> Vec<DeviceInfo>;
     fn output_devices(&self) -> Vec<DeviceInfo>;
