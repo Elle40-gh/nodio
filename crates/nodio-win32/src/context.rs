@@ -59,6 +59,16 @@ use crate::loopback::LoopbackSession;
 use crate::node::{NodeConnectionInfo, NodeConnectionKind};
 use crate::session::{session_node_match, AudioSession, AudioSessionKind};
 
+/// Format a `windows::core::Error` by its HRESULT code only.
+///
+/// windows 0.37's `Error` `Display`/`Debug` call `HRESULT::message()`, which passes the
+/// (possibly null) `FormatMessageW` buffer to `slice::from_raw_parts`. When the code has
+/// no system message text the buffer is null and that is undefined behavior — modern Rust
+/// aborts the process on it. Formatting the numeric code sidesteps the buggy path.
+fn hresult_str(err: &windows::core::Error) -> String {
+    format!("HRESULT {:#010X}", err.code().0)
+}
+
 pub struct Win32Context {
     device_enumerator: AudioDeviceEnumerator,
     audio_policy_config: Box<dyn AudioPolicyConfig>,
@@ -352,8 +362,8 @@ impl Win32Context {
                 target_device.mmdevice(),
             )
             .map_err(|err| {
-                error!("Could not start loopback session: {}", err);
-                Error::CouldNotConnect(err.to_string())
+                error!("Could not start loopback session: {}", hresult_str(&err));
+                Error::CouldNotConnect(hresult_str(&err))
             })?;
 
             conn_info.kind = NodeConnectionKind::Loopback;
@@ -373,11 +383,11 @@ impl Win32Context {
                             target_device.mmdevice_id(eRender),
                         ) {
                             error!(
-                                "Failed to set audio endpoint for process {}: {:?}",
+                                "Failed to set audio endpoint for process {}: {}",
                                 session.process_id(),
-                                err
+                                hresult_str(&err)
                             );
-                            return Err(Error::CouldNotConnect(err.to_string()));
+                            return Err(Error::CouldNotConnect(hresult_str(&err)));
                         } else {
                             debug!(
                                 "Set default audio endpoint for process {}",
@@ -392,7 +402,7 @@ impl Win32Context {
                     error!(
                         "Failed to get default endpoint for process {}: {}",
                         session.process_id(),
-                        err
+                        hresult_str(&err)
                     );
                 }
             }
@@ -421,9 +431,9 @@ impl Win32Context {
             warn!(
                 "Failed to enable listening on device {}: {}",
                 input_device.name(),
-                err
+                hresult_str(&err)
             );
-            return Err(Error::CouldNotConnect(err.to_string()));
+            return Err(Error::CouldNotConnect(hresult_str(&err)));
         }
 
         self.node_connections.push(NodeConnectionInfo {
