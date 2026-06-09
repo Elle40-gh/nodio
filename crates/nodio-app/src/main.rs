@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![deny(clippy::all)]
 use std::sync::Arc;
 use std::time::Duration;
